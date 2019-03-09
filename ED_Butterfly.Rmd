@@ -1,0 +1,209 @@
+---
+title: "Project_MHamz"
+author: "Mauro Hamz"
+date: "4/24/2018"
+output: html_document
+---
+```{r}
+library('Quandl')
+library('tseries')
+library('quantmod')
+library('fUnitRoots')
+library('fGarch')
+library('rugarch')
+library('nortest')
+library('sde')
+Quandl.api_key('ezFyGfS41qSFALj8ktuw')
+date.start='2017-01-01'
+```
+This project looks into trading opportunities using Treasury and Eurodollar futures synthetic products. By constructing Butterflies, Double Butterflies and Condors (see "Understanding Eurodollar Futures", Labuszewski, CME Group and "Understanding the Butterfly Strategy", Martellini, Priaulet, Priaulet, HSBC), we hope to get a stationary price series, which we can model as an AR(1) process.
+
+We can look at this AR(1) process as a mean-reverting process, consistent with the stationary properties of the series. This will allows us to get a measure of the "speed" of the mean-reverting process, thanks to the parameter estimation of the AR(1) model. 
+
+The following code gets data for some Eurodollar contracts in the future:
+
+```{r}
+# Eurodollar
+tickers.name=c("EDU2018","EDZ2018","EDH2019","EDM2019","EDU2019","EDZ2019","EDH2020","EDM2020","EDU2020","EDZ2020")
+tickers=tickers.name
+for(i in 1:length(tickers)) {tickers[i]=paste("CME/",tickers[i],".6",sep="")}
+
+tickers.count=length(tickers)
+EDdata=Quandl(tickers,start_date=date.start)
+EDdata=na.pass(EDdata)
+colnames(EDdata)=c("Date",tickers)
+
+plot(EDdata$Date,EDdata[,2])
+plot(EDdata$Date,EDdata[,3])
+plot(EDdata$Date,EDdata[,4])
+plot(EDdata$Date,EDdata[,11])
+plot(EDdata$Date,EDdata[,12])
+
+```
+
+We plot the data to see if it is consistent, and to check that the download went well.
+
+Next, we construct three different synthetic products from these contracts: Butterflies, Double Butterflies and Condors:
+
+```{r}
+#Synthetic Products:
+bfly1 <- (EDdata[,3]-2*EDdata[,4]+EDdata[,5])
+plot(bfly1, type='l')
+dbfly1 <- (EDdata[,3]+3*EDdata[,4]-3*EDdata[,5]-EDdata[,6])
+plot(dbfly1, type='l')
+cond1 <- (EDdata[,3]-EDdata[,4]-EDdata[,5]+EDdata[,6])
+plot(cond1,type='l')
+
+bfly2 <- (EDdata[,7]-2*EDdata[,8]+EDdata[,9])
+plot(bfly2, type='l')
+dbfly2 <- (EDdata[,7]-3*EDdata[,8]+3*EDdata[,9]-EDdata[,10])
+plot(dbfly2, type='l')
+cond2 <- (EDdata[,7]-EDdata[,8]-EDdata[,9]+EDdata[,10])
+plot(cond2,type='l')
+
+bfly3 <- (EDdata[,8]-2*EDdata[,9]+EDdata[,10])
+plot(bfly3, type='l')
+dbfly3 <- (EDdata[,8]-3*EDdata[,9]+3*EDdata[,10]-EDdata[,11])
+plot(dbfly3, type='l')
+cond3 <- (EDdata[,8]-EDdata[,9]-EDdata[,10]+EDdata[,11])
+plot(cond3,type='l')
+
+bfly4 <- (EDdata[,9]-2*EDdata[,10]+EDdata[,11])
+plot(bfly4, type='l')
+dbfly4 <- (EDdata[,9]-3*EDdata[,10]+3*EDdata[,11]-EDdata[,12])
+plot(dbfly4, type='l')
+cond4 <- (EDdata[,9]-EDdata[,10]-EDdata[,11]+EDdata[,12])
+plot(cond4,type='l')
+
+bfly5 <- (EDdata[,10]-2*EDdata[,11]+EDdata[,12])
+plot(bfly5, type='l')
+dbfly5 <- (EDdata[,10]-3*EDdata[,11]+3*EDdata[,12]-EDdata[,13])
+plot(dbfly5, type='l')
+cond5 <- (EDdata[,10]-EDdata[,11]-EDdata[,12]+EDdata[,13])
+plot(cond5,type='l')
+```
+A quick look at the plot reveals that the Butterly1 appears to be a mean reverting process that fluctuates very tightly around zero. However, there appears to be a divergence from the mean at the end of the period. 
+
+The Double Butterfly1 series is not as tight as the Butterfly 1, but it's still interesting to analyze. The Condor 1 is similar to the Butterfly 1, with a tight spread that diverges towards the end of the series.
+
+The interesting observation here is that, as we construct synthetic products with calendar spreads farther into the future, the series appear to become tighter and to diverge less, as we can see with the products labeled 2 and 3.
+
+To formally check for stationarity, we perform the Augmented Dickey-Fuller test to these series:
+
+```{r}
+#Check if series are stationary 
+#For lag, we use Schwert Criterion
+sc = trunc(12*(length(EDdata[,2])/100)^(1/4))
+sc
+adfTest(bfly1,lag=sc,type=c("nc")) # Stationary
+adfTest(dbfly1,lag=sc,type=c("nc")) # non-stationary
+adfTest(cond1,lag=sc,type=c("nc")) # non-stationary
+
+adfTest(bfly2,lag=sc,type=c("nc")) # non-stationary
+adfTest(dbfly2,lag=sc,type=c("nc")) # Stationary
+adfTest(cond2,lag=sc,type=c("nc")) # non-stationary
+
+adfTest(bfly3,lag=sc,type=c("nc")) # Stationary
+adfTest(dbfly3,lag=sc,type=c("nc")) # non-stationary
+adfTest(cond3,lag=sc,type=c("nc")) # non-stationary
+
+adfTest(bfly4,lag=sc,type=c("nc")) # non-stationary
+adfTest(dbfly4,lag=sc,type=c("nc")) # non-stationary
+adfTest(cond4,lag=sc,type=c("nc")) # Stationary at 90%
+
+adfTest(bfly5,lag=10,type=c("nc")) # non-stationary
+adfTest(dbfly5,lag=10,type=c("nc")) # non-stationary
+adfTest(cond5,lag=10,type=c("nc")) # non-stationary
+```
+We can see that the regular Butterflies (1, 2 and 3) are stationary series (although #2 barely at 90% significance), and that the Double Butterfly 2 is also stationary. The rest of the series are non-stationary, even further down time in the calendar spreads.
+
+Now, let's fit an AR(1) model to the stationary series that we found:
+
+```{r}
+#Fitting an AR(1) model
+bfly1.ar1<-arima(bfly1,order=c(1,0,0))
+bfly1.ar1 #AR1 Coeff = 0.7724, std error = .0351, intercept = 0
+cond4.ar1<-arima(cond4,order=c(1,0,0))
+cond4.ar1 #AR1 Coeff = 0.6938, std error = .0397, intercept ar1 = 0.0058
+dbfly2.ar1<-arima(dbfly2,order=c(1,0,0))
+dbfly2.ar1 #AR1 Coeff = 0.4272, std error = .0505, intercept = 0
+bfly3.ar1<-arima(bfly3,order=c(1,0,0))
+bfly3.ar1 #AR1 Coeff = 0.5278, std error = .0477, intercept ar1 = 0
+```
+By fitting the model, we obtain the AR(1) coefficient and the intercept for the model. The model equations are as follows:
+$$bfly1: y_{t+1}  = 0.7724y_t + u_t .$$
+$$cond4: y_{t+1}  = 0.0058 + 0.6938y_t + u_t .$$
+$$dbfly2: y_{t+1}  = 0.4272y_t + u_t .$$
+$$bfly3: y_{t+1}  = 0.5278y_t + u_t .$$
+Now, we are trying to model these time series as mean-reverting processess following a Ornstein-Uhlenbeck process, with a discretized equation of the form:
+$$ y_t = y_{t-1} +  \kappa(\beta - y_{t-1})\Delta t + \sigma \sqrt(\Delta t) \epsilon  .$$
+With some manipulation, we get a slightly different form of the equation, from which we can estimate the parameter "kappa", which measures the mean-reverting "speed" of the process.
+$$ y_t = (1-\kappa\Delta t)y_{t-1} +  \kappa\beta\Delta t + \sigma \sqrt(\Delta t) \epsilon  .$$
+Where
+$$ \phi_1 = (1-\kappa\Delta t)   .$$
+And
+$$ \mu =   \kappa\beta\Delta t   .$$
+We estimate these parameters with the following code:
+
+```{r}
+#Parameter Estimation
+dt <- 1/252
+dt
+#bfly1 AR1 Coeff = 0.7724, std error = .0351, intercept = 0
+k1 <- (1-.7724)/dt
+k1
+mu1 <- k1*0*dt
+mu1
+#bfly2 AR1 Coeff = 0.6938, std error = .0449, intercept ar1 = 0.0058
+k4 <- (1-.6938)/dt
+k4
+mu4 <- k4*.0058*dt
+mu4
+#dbly2 AR1 Coeff = 0.4272, std error = .0505, intercept = 0
+k.d2 <- (1-.4272)/dt
+k.d2
+mu.d2 <- k.d2*0*dt
+mu.d2
+#bfly3 AR1 Coeff = 0.5278, std error = .0477, intercept ar1 = 0
+k3 <- (1-.5278)/dt
+k3
+mu3 <- k3*0*dt
+mu3
+```
+Finally, with these parameters, we can estimate the "Half-life" of the mean-reverting process. This will tell us the time it takes the series to mean revert. With this information, we can start to develop a trading strategy that will take this time to enter and exit positions of buy and sell orders in these synthetic products.
+
+```{r}
+# Half-life in days 
+H1 <- (log(2)/k1)/dt
+H1
+H4 <- (log(2)/k4)/dt
+H4
+H.d2 <- (log(2)/k.d2)/dt
+H.d2
+H3 <- (log(2)/k3)/dt
+H3
+
+#Plot Half-life
+deltat<-1:328
+hl1<-(log(2)/k1)/deltat
+plot(deltat,bfly1,type="l")+
+  lines(deltat,hl1,col="red")
+
+hl4<-(log(2)/k4)/deltat
+plot(deltat,cond4,type="l")+
+  lines(deltat,hl4,col="red")
+
+hl.d2<-(log(2)/k.d2)/deltat
+plot(deltat,dbfly2,type="l")+
+  lines(deltat,hl.d2,col="red")
+
+hl3<-(log(2)/k3)/deltat
+plot(deltat,bfly3,type="l")+
+  lines(deltat,hl3,col="red")
+
+```
+We have obtained information about the half-life of four set of series that we are assuming are mean reverting. As mentioned before, this will allow us to build a trading rule where we enter and exit into this contracts following the timing derived from the half-life.
+
+For a visual check, we plot the half-life over the plots of the synthetic products. We see that the half-life matches the time for the series to converge to the mean.
+
+At this stage, we derived the half-life from the full sample perios, and would have to test in an out-of-sample period to see if they work. A valuable exercise would be to derive the half-life using 70% of this data, and test in the following 30% of the data to see the prediction power of this parameter. Further work is needed to come up with a trading rule and perform backtest with this method. 
